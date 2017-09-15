@@ -2,6 +2,25 @@
 
 #define CRTP_MAX_DATA_SIZE 30
 
+// Port 
+#define CONSOLE           0x00
+#define PARAM             0x02
+#define COMMANDER         0x03
+#define MEM               0x04
+#define LOGGING           0x05
+#define LOCALIZATION      0x06
+#define COMMANDER_GENERIC 0x07
+#define PLATFORM          0x0D
+#define DEBUGDRIVER       0x0E
+#define LINKCTRL          0x0F
+#define ALL               0xFF
+
+// Channel
+#define TYPE_STOP             0
+#define TYPE_VELOCITY_WORLD   1
+#define TYPE_ZDISTANCE        2
+#define TYPE_HOVER            5
+
 // Header
 struct crtp
 {
@@ -171,7 +190,7 @@ struct crtpSetpointRequest
     float pitch,
     float yawrate,
     uint16_t thrust)
-    : header(0x03, 0)
+    : header(COMMANDER, 0)
     , roll(roll)
     , pitch(pitch)
     , yawrate(yawrate)
@@ -183,6 +202,29 @@ struct crtpSetpointRequest
   float pitch;
   float yawrate;
   uint16_t thrust;
+}  __attribute__((packed));
+
+struct crtpSetpointRequestHover
+{
+  crtpSetpointRequestHover(
+    float roll,
+    float pitch,
+    float yawrate,
+    float thrust)
+    : header(COMMANDER_GENERIC, 0)
+    , roll(roll)
+    , pitch(pitch)
+    , yawrate(yawrate)
+    , thrust(thrust)
+    , type(TYPE_HOVER)
+  {
+  }
+  const crtp header;
+  uint8_t type;
+  float roll;
+  float pitch;
+  float yawrate;
+  float thrust;
 }  __attribute__((packed));
 
 // Port 4 (Memory access)

@@ -108,6 +108,16 @@ void Crazyflie::sendSetpoint(
   sendPacket((const uint8_t*)&request, sizeof(request));
 }
 
+void Crazyflie::sendSetpointHover(
+  float roll,
+  float pitch,
+  float yawrate,
+  float thrust)
+{
+  crtpSetpointRequestHover request(roll, pitch, yawrate, thrust);
+  sendPacket((const uint8_t*)&request, sizeof(request));
+}
+
 void Crazyflie::sendExternalPositionUpdate(
   float x,
   float y,
@@ -133,7 +143,7 @@ void Crazyflie::transmitPackets()
     std::vector<crtpPacket_t>::iterator it;
     for (it = m_outgoing_packets.begin(); it != m_outgoing_packets.end(); it++)
     {
-      sendPacket(it->raw, it->size+1);
+      sendPacket(it->raw, it->size);
     }
     m_outgoing_packets.clear();
   }

@@ -17,6 +17,7 @@ class Controller():
         self._emergency = rospy.ServiceProxy('emergency', Empty)
 
         if use_controller:
+            rospy.loginfo('use_controller')
             rospy.loginfo("waiting for land service")
             rospy.wait_for_service('land')
             rospy.loginfo("found land service")
@@ -36,6 +37,7 @@ class Controller():
         rospy.Subscriber(joy_topic, Joy, self._joyChanged)
 
     def _joyChanged(self, data):
+        rospy.loginfo(str(data.buttons))
         for i in range(0, len(data.buttons)):
             if self._buttons == None or data.buttons[i] != self._buttons[i]:
                 if i == 0 and data.buttons[i] == 1 and self._land != None:
@@ -43,6 +45,7 @@ class Controller():
                 if i == 1 and data.buttons[i] == 1:
                     self._emergency()
                 if i == 2 and data.buttons[i] == 1 and self._takeoff != None:
+                    rospy.loginfo('go')
                     self._takeoff()
                 if i == 4 and data.buttons[i] == 1:
                     value = int(rospy.get_param("ring/headlightEnable"))
@@ -57,7 +60,7 @@ class Controller():
 
 if __name__ == '__main__':
     rospy.init_node('crazyflie_demo_controller', anonymous=True)
-    use_controller = rospy.get_param("~use_crazyflie_controller", False)
+    use_controller = rospy.get_param("~use_crazyflie_controller", True)
     joy_topic = rospy.get_param("~joy_topic", "joy")
     controller = Controller(use_controller, joy_topic)
     rospy.spin()

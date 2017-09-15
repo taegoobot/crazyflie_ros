@@ -74,6 +74,12 @@ public:
     float pitch,
     float yawrate,
     uint16_t thrust);
+  
+  void sendSetpointHover(
+    float roll,
+    float pitch,
+    float yawrate,
+    float thrust);
 
   void sendExternalPositionUpdate(
     float x,
@@ -343,11 +349,13 @@ public:
 private:
   void handleData(crtpLogDataResponse* response, uint8_t size) {
     if (size == sizeof(T)) {
+//      std::cout << "response: " << response << "    " << "T-size: " << sizeof(T) << "     " << "size: " << (int)size << "    " << "id: " << (int)m_id << std::endl;
       uint32_t time_in_ms = ((uint32_t)response->timestampHi << 8) | (response->timestampLo);
       T* t = (T*)response->data;
       m_callback(time_in_ms, t);
     }
     else {
+//      std::cout << "response: " << response << "    " << "T-size: " << sizeof(T) << "     " << "size: " << (int)size << "    " << "id: " << (int)m_id << std::endl;
       std::cerr << "Size doesn't match!" << std::endl;
     }
   }

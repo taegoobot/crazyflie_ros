@@ -15,6 +15,7 @@
 #include "sensor_msgs/Temperature.h"
 #include "sensor_msgs/MagneticField.h"
 #include "std_msgs/Float32.h"
+#include "std_msgs/Int16.h"
 
 //#include <regex>
 #include <thread>
@@ -24,6 +25,10 @@
 #include <map>
 
 #include <crazyflie_cpp/Crazyflie.h>
+
+#define MAX_HEIGHT_HOVER    2.0f
+#define MAX_VX              1.0f
+#define MAX_VY              1.0f
 
 constexpr double pi() { return 3.141592653589793238462643383279502884; }
 
@@ -52,6 +57,7 @@ public:
     bool enable_logging_magnetic_field,
     bool enable_logging_pressure,
     bool enable_logging_battery,
+    bool enable_logging_zrange,
     bool enable_logging_packets)
     : m_cf(link_uri)
     , m_tf_prefix(tf_prefix)
@@ -67,6 +73,7 @@ public:
     , m_enable_logging_magnetic_field(enable_logging_magnetic_field)
     , m_enable_logging_pressure(enable_logging_pressure)
     , m_enable_logging_battery(enable_logging_battery)
+    , m_enable_logging_zrange(enable_logging_zrange)
     , m_enable_logging_packets(enable_logging_packets)
     , m_serviceEmergency()
     , m_serviceUpdateParams()
@@ -83,6 +90,7 @@ public:
   {
     ros::NodeHandle n;
     m_subscribeCmdVel = n.subscribe(tf_prefix + "/cmd_vel", 1, &CrazyflieROS::cmdVelChanged, this);
+    m_subscribeCmdVelHover = n.subscribe(tf_prefix + "/cmd_vel_hover", 1, &CrazyflieROS::cmdVelChangedHover, this);
     m_subscribeExternalPosition = n.subscribe(tf_prefix + "/external_position", 1, &CrazyflieROS::positionMeasurementChanged, this);
     m_serviceEmergency = n.advertiseService(tf_prefix + "/emergency", &CrazyflieROS::emergency, this);
 
@@ -100,6 +108,9 @@ public:
     }
     if (m_enable_logging_battery) {
       m_pubBattery = n.advertise<std_msgs::Float32>(tf_prefix + "/battery", 10);
+    }
+    if (m_enable_logging_zrange) {
+      m_pubZrange = n.advertise<std_msgs::Int16>(tf_prefix + "/range", 10);
     }
     if (m_enable_logging_packets) {
       m_pubPackets = n.advertise<crazyflie_driver::crtpPacket>(tf_prefix + "/packets", 10);
@@ -188,6 +199,21 @@ private:
     float baro_pressure;
     float pm_vbat;
   } __attribute__((packed));
+  
+  struct log3 {
+    unsigned short int zrange;
+  } __attribute__((packed));
+  
+  struct twist {
+      float roll; 
+      float pitch; 
+      float yawrate; 
+      float thrust;
+      
+      void clear() {roll=pitch=yawrate=thrust=0.0f;}
+  };
+  
+  twist cur_twist;
 
 private:
   bool emergency(
@@ -260,8 +286,44 @@ private:
       float pitch = - (msg->linear.x + m_pitch_trim);
       float yawrate = msg->angular.z;
       uint16_t thrust = std::min<uint16_t>(std::max<float>(msg->linear.z, 0.0), 60000);
+      
+      static int cnt_print(0); 
+      if (cnt_print++ > 5)
+      {
+        cnt_print = 0; 
+        printf("normal:    roll: %f, pitch: %f, yawrate: %f, thrust: %d\n"
+                , roll, pitch, yawrate, thrust);
+        printf("\n");
+      }
 
       m_cf.sendSetpoint(roll, pitch, yawrate, thrust);
+      m_sentSetpoint = true;
+    }
+  }
+  
+  void cmdVelChangedHover(
+    const geometry_msgs::Twist::ConstPtr& msg)
+  {
+    if (!m_isEmergency) {
+      cur_twist.roll = msg->linear.y + m_roll_trim;
+      cur_twist.pitch = - (msg->linear.x + m_pitch_trim);
+      cur_twist.yawrate = msg->angular.z;
+      cur_twist.thrust = std::min<float>(std::max<float>(msg->linear.z, 0.0), MAX_HEIGHT_HOVER);
+
+      static int cnt_print(0); 
+      if (cnt_print++ > 5)
+      {
+        cnt_print = 0; 
+        printf("current:    roll: %f, pitch: %f, yawrate: %f, thrust: %f\n"
+                , cur_twist.roll, cur_twist.pitch, cur_twist.yawrate, cur_twist.thrust);
+        printf("\n");
+      }
+      
+      m_cf.sendSetpointHover(cur_twist.pitch
+                           , cur_twist.roll
+                           , cur_twist.yawrate
+                           , cur_twist.thrust);      
+      
       m_sentSetpoint = true;
     }
   }
@@ -321,6 +383,7 @@ private:
 
     std::unique_ptr<LogBlock<logImu> > logBlockImu;
     std::unique_ptr<LogBlock<log2> > logBlock2;
+    std::unique_ptr<LogBlock<log3> > logBlock3;
     std::vector<std::unique_ptr<LogBlockGeneric> > logBlocksGeneric(m_logBlocks.size());
     if (m_enableLogging) {
 
@@ -362,6 +425,17 @@ private:
             {"pm", "vbat"},
           }, cb2));
         logBlock2->start(10); // 100ms
+      }
+      
+      if ( m_enable_logging_zrange )
+      {
+        std::function<void(uint32_t, log3*)> cb3 = std::bind(&CrazyflieROS::onLog3Data, this, std::placeholders::_1, std::placeholders::_2);
+
+        logBlock3.reset(new LogBlock<log3>(
+          &m_cf,{
+            {"range", "zrange"},
+          }, cb3));
+        logBlock3->start(10); // 100ms
       }
 
       // custom log blocks
@@ -489,6 +563,16 @@ private:
       m_pubBattery.publish(msg);
     }
   }
+  
+  void onLog3Data(uint32_t time_in_ms, log3* data) {
+
+    if (m_enable_logging_zrange) {
+      std_msgs::Int16 msg;
+      // Zrange
+      msg.data = data->zrange;
+      m_pubZrange.publish(msg);
+    }
+  }
 
   void onLogCustom(uint32_t time_in_ms, std::vector<double>* values, void* userData) {
 
@@ -534,17 +618,20 @@ private:
   bool m_enable_logging_magnetic_field;
   bool m_enable_logging_pressure;
   bool m_enable_logging_battery;
+  bool m_enable_logging_zrange;
   bool m_enable_logging_packets;
 
   ros::ServiceServer m_serviceEmergency;
   ros::ServiceServer m_serviceUpdateParams;
   ros::Subscriber m_subscribeCmdVel;
+  ros::Subscriber m_subscribeCmdVelHover;
   ros::Subscriber m_subscribeExternalPosition;
   ros::Publisher m_pubImu;
   ros::Publisher m_pubTemp;
   ros::Publisher m_pubMag;
   ros::Publisher m_pubPressure;
   ros::Publisher m_pubBattery;
+  ros::Publisher m_pubZrange;
   ros::Publisher m_pubPackets;
   ros::Publisher m_pubRssi;
   std::vector<ros::Publisher> m_pubLogDataGeneric;
@@ -589,6 +676,7 @@ bool add_crazyflie(
     req.enable_logging_magnetic_field,
     req.enable_logging_pressure,
     req.enable_logging_battery,
+    req.enable_logging_zrange,
     req.enable_logging_packets);
 
   crazyflies[req.uri] = cf;

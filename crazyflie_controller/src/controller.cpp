@@ -68,7 +68,7 @@ public:
         , m_serviceTakeoff()
         , m_serviceLand()
         , m_thrust(0)
-        , m_startZ(0)
+        , m_startZ(-0.172)
     {
         ros::NodeHandle nh;
         m_listener.waitForTransform(m_worldFrame, m_frame, ros::Time(0), ros::Duration(10.0)); 
