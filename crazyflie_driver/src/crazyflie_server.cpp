@@ -9,6 +9,7 @@
 #include "crazyflie_cpp/Crazyradio.h"
 #include "crazyflie_cpp/crtp.h"
 #include "std_srvs/Empty.h"
+#include "geometry_msgs/Pose.h"
 #include "geometry_msgs/Twist.h"
 #include "geometry_msgs/PointStamped.h"
 #include "sensor_msgs/Imu.h"
@@ -58,7 +59,8 @@ public:
     bool enable_logging_pressure,
     bool enable_logging_battery,
     bool enable_logging_zrange,
-    bool enable_logging_packets)
+    bool enable_logging_packets,
+    bool enable_logging_state)
     : m_cf(link_uri)
     , m_tf_prefix(tf_prefix)
     , m_isEmergency(false)
@@ -75,6 +77,7 @@ public:
     , m_enable_logging_battery(enable_logging_battery)
     , m_enable_logging_zrange(enable_logging_zrange)
     , m_enable_logging_packets(enable_logging_packets)
+    , m_enable_logging_state(enable_logging_state)
     , m_serviceEmergency()
     , m_serviceUpdateParams()
     , m_subscribeCmdVel()
@@ -114,6 +117,10 @@ public:
     }
     if (m_enable_logging_packets) {
       m_pubPackets = n.advertise<crazyflie_driver::crtpPacket>(tf_prefix + "/packets", 10);
+    }
+    if (m_enable_logging_state) {
+      m_pubStatePose  = n.advertise<geometry_msgs::Pose>(tf_prefix + "/state_pose", 10);
+      m_pubStateVel   = n.advertise<geometry_msgs::Twist>(tf_prefix + "/state_vel", 10);
     }
     m_pubRssi = n.advertise<std_msgs::Float32>(tf_prefix + "/rssi", 10);
 
@@ -203,6 +210,15 @@ private:
   struct log3 {
     unsigned short int zrange;
   } __attribute__((packed));
+
+  struct logState {
+    float state_x;
+    float state_y;
+    float state_z;
+    float state_px;
+    uint16_t state_py;
+    uint16_t state_pz;
+  } __attribute__((packed));
   
   struct twist {
       float roll; 
@@ -287,16 +303,20 @@ private:
       float yawrate = msg->angular.z;
       uint16_t thrust = std::min<uint16_t>(std::max<float>(msg->linear.z, 0.0), 60000);
       
-      static int cnt_print(0); 
-      if (cnt_print++ > 5)
-      {
-        cnt_print = 0; 
-        printf("normal:    roll: %f, pitch: %f, yawrate: %f, thrust: %d\n"
-                , roll, pitch, yawrate, thrust);
-        printf("\n");
-      }
+      // static int cnt_print(0); 
+      // if (cnt_print++ > 5)
+      // {
+      //   cnt_print = 0; 
+      //   printf("normal:    roll: %f, pitch: %f, yawrate: %f, thrust: %d\n"
+      //           , roll, pitch, yawrate, thrust);
+      //   printf("\n");
+      // }
 
-      m_cf.sendSetpoint(roll, pitch, yawrate, thrust);
+      m_cf.sendSetpoint(roll
+                      , pitch
+                      , yawrate
+                      , thrust);
+
       m_sentSetpoint = true;
     }
   }
@@ -309,18 +329,19 @@ private:
       cur_twist.pitch = - (msg->linear.x + m_pitch_trim);
       cur_twist.yawrate = msg->angular.z;
       cur_twist.thrust = std::min<float>(std::max<float>(msg->linear.z, 0.0), MAX_HEIGHT_HOVER);
+      // cur_twist.thrust = std::min<float>(std::max<float>(msg->linear.z, 0.0), 60000.0);
 
-      static int cnt_print(0); 
-      if (cnt_print++ > 5)
-      {
-        cnt_print = 0; 
-        printf("current:    roll: %f, pitch: %f, yawrate: %f, thrust: %f\n"
-                , cur_twist.roll, cur_twist.pitch, cur_twist.yawrate, cur_twist.thrust);
-        printf("\n");
-      }
+      // static int cnt_print(0); 
+      // if (cnt_print++ > 5)
+      // {
+      //   cnt_print = 0; 
+      //   printf("current:    roll: %f, pitch: %f, yawrate: %f, thrust: %f\n"
+      //           , cur_twist.roll, cur_twist.pitch, cur_twist.yawrate, cur_twist.thrust);
+      //   printf("\n");
+      // }
       
-      m_cf.sendSetpointHover(cur_twist.pitch
-                           , cur_twist.roll
+      m_cf.sendSetpointHover(cur_twist.roll
+                           , cur_twist.pitch
                            , cur_twist.yawrate
                            , cur_twist.thrust);      
       
@@ -384,6 +405,7 @@ private:
     std::unique_ptr<LogBlock<logImu> > logBlockImu;
     std::unique_ptr<LogBlock<log2> > logBlock2;
     std::unique_ptr<LogBlock<log3> > logBlock3;
+    std::unique_ptr<LogBlock<logState> > logBlockState;
     std::vector<std::unique_ptr<LogBlockGeneric> > logBlocksGeneric(m_logBlocks.size());
     if (m_enableLogging) {
 
@@ -436,6 +458,42 @@ private:
             {"range", "zrange"},
           }, cb3));
         logBlock3->start(10); // 100ms
+      }
+
+      if ( m_enable_logging_state )
+      {
+        std::function<void(uint32_t, logState*)> cb4 = std::bind(&CrazyflieROS::onStateData, this, std::placeholders::_1, std::placeholders::_2);
+
+        logBlockState.reset(new LogBlock<logState>(
+          &m_cf,{
+            // {"kalman", "stateX"},
+            // {"kalman", "stateY"},
+            // {"kalman", "stateZ"},
+            {"kalman", "statePX"},
+            {"kalman", "statePY"},
+            {"kalman", "statePZ"},
+            // {"controller", "roll"},
+            // {"controller", "pitch"},
+            // {"controller", "yaw"},
+            // {"stabilizer", "roll"},
+            // {"stabilizer", "pitch"},
+            {"stabilizer", "yaw"},
+            // {"bicon", "bicon_x"},
+            // {"bicon", "bicon_y"},
+            // {"bicon", "bicon_z"},
+            // {"bicon", "bicon_std"},
+            // {"velController", "targetHeight"},
+            // {"velCtl", "thrustRaw"},
+            // {"velCtl", "vel_state_z"},
+            // {"velCtl", "vel_setpoint_z"},
+            // {"pwm", "m1_pwm"},
+            // {"pwm", "m2_pwm"},
+            // {"pwm", "m3_pwm"},
+            // {"pwm", "m4_pwm"},
+            {"emergency", "emergencyStop"},
+            {"stabilizer", "thrust"},
+          }, cb4));
+        logBlockState->start(10); // 100ms
       }
 
       // custom log blocks
@@ -574,6 +632,26 @@ private:
     }
   }
 
+  void onStateData(uint32_t time_in_ms, logState* data) {
+    if (m_enable_logging_state) {
+      geometry_msgs::Pose msg_pose;
+      geometry_msgs::Twist msg_twist;
+
+      // measured in meter;
+      msg_pose.position.x = data->state_x;
+      msg_pose.position.y = data->state_y;
+      msg_pose.position.z = data->state_z;
+
+      // measured in rad/sec
+      msg_twist.linear.x = data->state_px;
+      msg_twist.linear.y = data->state_py;
+      msg_twist.linear.z = data->state_pz;
+
+      m_pubStatePose.publish(msg_pose);
+      m_pubStateVel.publish(msg_twist);
+    }
+  }
+
   void onLogCustom(uint32_t time_in_ms, std::vector<double>* values, void* userData) {
 
     ros::Publisher* pub = reinterpret_cast<ros::Publisher*>(userData);
@@ -620,6 +698,7 @@ private:
   bool m_enable_logging_battery;
   bool m_enable_logging_zrange;
   bool m_enable_logging_packets;
+  bool m_enable_logging_state;
 
   ros::ServiceServer m_serviceEmergency;
   ros::ServiceServer m_serviceUpdateParams;
@@ -634,6 +713,8 @@ private:
   ros::Publisher m_pubZrange;
   ros::Publisher m_pubPackets;
   ros::Publisher m_pubRssi;
+  ros::Publisher m_pubStatePose;
+  ros::Publisher m_pubStateVel;
   std::vector<ros::Publisher> m_pubLogDataGeneric;
 
   bool m_sentSetpoint, m_sentExternalPosition;
@@ -677,7 +758,8 @@ bool add_crazyflie(
     req.enable_logging_pressure,
     req.enable_logging_battery,
     req.enable_logging_zrange,
-    req.enable_logging_packets);
+    req.enable_logging_packets,
+    req.enable_logging_state);
 
   crazyflies[req.uri] = cf;
 

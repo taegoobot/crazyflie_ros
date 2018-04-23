@@ -1,10 +1,11 @@
 <?xml version="1.0"?>
 <launch>
   <arg name="joy_dev" default="/dev/input/js0" />
-  <arg name="ip" default="vicon" />
+  <arg name="ip" default="192.168.0.5" />
   <arg name="port" default="3883" />
+  <arg name="freq" default="100" />
 
-  <arg name="uri" default="radio://0/90/2M" />
+  <arg name="uri" default="radio://0/80/250K" />
   <arg name="frame" default="crazyflie" />
   <arg name="x" default="0" />
   <arg name="y" default="0" />
@@ -43,12 +44,23 @@
     <node pkg="tf" type="static_transform_publisher" name="baselink_broadcaster" args="0 0 0 0 0 0 1 $(arg frame) /crazyflie/base_link 100" />
 
     <!-- run vrpn client -->
+<!--
     <node pkg="ros_vrpn_client" name="vrpn" output="screen" type="ros_vrpn_client" required="true">
       <param name="ip" value="$(arg ip)" />
       <param name="port" value="$(arg port)" />
       <param name="frame_id" value="/world" />
       <param name="child_frame_id" value="$(arg frame)" />
     </node>
+-->
+
+    <node pkg="vrpn_client_ros" name="vrpn_client_node" output="screen" type="vrpn_client_node" required="true">
+      <param name="server" value="$(arg ip)" />
+      <param name="port" value="$(arg port)" />
+      <param name="update_frequency" value="$(arg freq)" />
+      <param name="frame_id" value="/world" />
+      <param name="child_frame_id" value="$(arg frame)" />
+    </node>
+
   </group>
 
 
